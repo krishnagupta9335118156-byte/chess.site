@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chess Master Pro</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        
+        :root {
+            --bg-light: #ebecd0;
+            --bg-dark: #779556;
+            --hl-last: rgba(246, 246, 105, 0.8);
+        }
+
+        .chess-container {
+            user-select: none;
+            touch-action: manipulation;
+        }
+
+        .board-grid {
+            display: grid;
+            grid-template-columns: repeat(8, 1fr);
+            grid-template-rows: repeat(8, 1fr);
+            aspect-ratio: 1/1;
+            width: 100%;
+            max-width: 600px;
+            box-shadow: 0 12px 40px -10px rgba(0, 0, 0, 0.4);
+            border: 2px solid #444;
+        }
+
+        .square {
+            position: relative;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            cursor: pointer;
+        }
+
+        .square.light { background-color: var(--bg-light); }
+        .square.dark { background-color: var(--bg-dark); }
+        
+        .square.selected { background-color: #bbc343 !important; }
+        .square.last-move { background-color: var(--hl-last) !important; }
+        
+        .move-dot {
+            width: 25%;
+            height: 25%;
+            background: rgba(0, 0, 0, 0.12);
+            border-radius: 50%;
+            z-index: 5;
+        }
+
+        .capture-ring {
+            width: 85%;
+            height: 85%;
+            border: 6px solid rgba(0, 0, 0, 0.1);
+            border-radius: 50%;
+            position: absolute;
+            z-index: 5;
+        }
+
+        .piece-svg {
+            width: 95%;
+            height: 95%;
+            z-index: 10;
+            filter: drop-shadow(0 1px 1px rgba(0,0,0,0.15));
+            pointer-events: none;
+        }
+
+        .move-history-scroll::-webkit-scrollbar { width: 6px; }
+        .move-history-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+
+        @media (max-width: 640px) {
+            .board-grid { max-width: 100%; }
+        }
+    </style>
+</head>
+<body class="bg-[#262421] min-h-screen p-2 sm:p-6 flex flex-col items-center">
+
+    <div class="max-w-6xl w-full grid grid-cols-1 lg:grid-cols-12 gap-6 chess-container">
+        
+        <!-- UI Side -->
+        <div class="lg:col-span-3 space-y-4">
+            <div class="bg-[#312e2b] p-5 rounded-lg shadow-xl border border-white/5">
+                <h1 class="text-xl font-bold text-white mb-6 flex items-center gap-2">
+                    <span class="text-2xl">♟</span> Krishna Chess.com 
+                </h1>
+                
+                <div id="turn-card" class="mb-6 p-4 rounded-md transition-all border-l-4 border-[#779556] bg-[#262421]">
+                    <p class="text-[10px] uppercase font-bold text-gray-400 tracking-widest">Status</p>
+                    <h2 id="turn-text" class="text-white font-semibold">White to Move</h2>
+                </div>
+
+                <div id="game-alert" class="hidden mb-4 p-3 rounded bg-orange-500/20 text-orange-200 text-sm font-bold border border-orange-500/30 text-center"></div>
+
+                <div class="space-y-4 mb-6 p-4 bg-[#262421] rounded-lg">
+                    <div class="flex items-center justify-between">
+                        <span class="text-sm font-semibold text-gray-300">Play vs Bot</span>
+                        <label class="relative inline-flex items-center cursor-pointer">
+                            <input type="checkbox" id="bot-toggle" class="sr-only peer">
+                            <div class="w-10 h-5 bg-gray-600 rounded-full peer peer-checked:bg-[#779556] after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-5"></div>
+                        </label>
+                    </div>
+                    <div id="bot-settings" class="hidden">
+                        <select id="bot-difficulty" class="w-full text-xs p-2 rounded bg-[#312e2b] text-white border border-gray-600 outline-none">
+                            <option value="1">Depth 1 (Easy)</option>
+                            <option value="2" selected>Depth 2 (Normal)</option>
+                            <option value="3">Depth 3 (Hard)</option>
+                        </select>
+                    </div>
+                </div>
+
+                <button id="reset-btn" class="w-full py-3 bg-[#454241] hover:bg-[#555251] text-white font-bold rounded transition text-sm">
+                    New Game
+                </button>
+            </div>
+
+            <div class="bg-[#312e2b] p-4 rounded-lg shadow-xl border border-white/5">
+                <h3 class="text-xs font-bold text-gray-500 uppercase mb-3">Captured</h3>
+                <div class="space-y-3">
+                    <div id="captured-white" class="flex flex-wrap gap-0.5 min-h-[32px] bg-black/20 p-1 rounded"></div>
+                    <div id="captured-black" class="flex flex-wrap gap-0.5 min-h-[32px] bg-black/20 p-1 rounded"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Board Section -->
+        <div class="lg:col-span-6 flex items-center justify-center">
+            <div id="board" class="board-grid rounded overflow-hidden"></div>
+        </div>
+
+        <!-- History Side -->
+        <div class="lg:col-span-3">
+            <div class="bg-[#312e2b] rounded-lg shadow-xl border border-white/5 h-full flex flex-col overflow-hidden max-h-[600px]">
+                <div class="p-4 border-b border-white/5 bg-[#2a2825]">
+                    <h3 class="font-bold text-gray-300 text-sm">Move List</h3>
+                </div>
+                <div id="move-history" class="move-history-scroll flex-1 overflow-y-auto p-2 text-xs font-medium text-gray-400">
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Promotion Dialog -->
+    <div id="promotion-modal" class="fixed inset-0 bg-black/80 backdrop-blur-sm hidden flex items-center justify-center z-[100]">
+        <div class="bg-[#312e2b] p-6 rounded-lg shadow-2xl text-center border border-white/10">
+            <h3 class="text-white font-bold mb-4">Promote To</h3>
+            <div class="flex justify-center gap-2" id="promotion-options"></div>
+        </div>
+    </div>
+
+    <script>
+        // High-Quality Standard Wikipedia Piece SVGs
+        const SVG_PIECES = {
+            w: {
+                k: `<svg viewBox="0 0 45 45" class="piece-svg"><g fill="none" fill-rule="evenodd" stroke="#000" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"><path d="M22.5 11.63V6M20 8h5" stroke-linejoin="miter"/><path d="M22.5 25s4.5-7.5 4.5-11.06c0-2.27-2.02-4.44-4.5-4.44s-4.5 2.17-4.5 4.44c0 3.56 4.5 11.06 4.5 11.06z" fill="#fff"/><path d="M11.5 37c5.5 3.5 15.5 3.5 21 0v-7s9-4.5 6-10.5c-4-1-1-4-1-4h-30s3 3-1 4c-3 6 6 10.5 6 10.5v7z" fill="#fff"/><path d="M11.5 30c5.5-3 15.5-3 21 0m-21 3.5c5.5-3 15.5-3 21 0m-21 3.5c5.5-3 15.5-3 21 0" stroke-linejoin="miter"/></g></svg>`,
+                q: `<svg viewBox="0 0 45 45" class="piece-svg"><g fill="#fff" fill-rule="evenodd" stroke="#000" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"><path d="M8 12a2 2 0 1 1-4 0 2 2 0 0 1 4 0zm14.5 0a2 2 0 1 1-4 0 2 2 0 0 1 4 0zm14.5 0a2 2 0 1 1-4 0 2 2 0 0 1 4 0zM9 26c8.5-1.5 21-1.5 27 0l2-12-7 11V11l-5.5 13.5-5.5-13.5V25L13 14l2 12z"/><path d="M9 26c0 2 1.5 2 2.5 4 2.5 5 18 5 21 0 1-2 2.5-2 2.5-4-8.5-1.5-18.5-1.5-26 0z"/><path d="M11 38.5c7 2.5 16 2.5 23 0v-5c-7 2.5-16 2.5-23 0v5z" stroke-linejoin="miter"/><path d="M11 31c7 2.5 16 2.5 23 0m-23 3.5c7 2.5 16 2.5 23 0" stroke-linejoin="miter"/></g></svg>`,
+                r: `<svg viewBox="0 0 45 45" class="piece-svg"><g fill="#fff" fill-rule="evenodd" stroke="#000" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"><path d="M9 39h27v-3H9v3zM12 36l1.5-21h18l1.5 21H12zM11 14V9h4v2h5V9h5v2h5V9h4v5" stroke-linejoin="miter"/><path d="M34 14l-3 3H14l-3-3"/><path d="M31 17v12.5H14V17" stroke-linejoin="miter"/><path d="M31 29.5l1.5 2.5h-20l1.5-2.5"/><path d="M11 14h23" fill="none" stroke-linejoin="miter"/></g></svg>`,
+                b: `<svg viewBox="0 0 45 45" class="piece-svg"><g fill="none" fill-rule="evenodd" stroke="#000" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"><g fill="#fff" stroke-linecap="butt"><path d="M9 36c3.39-.97 10.11.43 13.5-2 3.39 2.43 10.11 1.03 13.5 2 0 0 1 1 1 3H8c0-2 1-3 1-3z"/><path d="M15 32c2.5 2.5 12.5 2.5 15 0 .5-1.5 0-2 0-2 0-2.5-2.5-4-2.5-4 5.5-1.5 6-11.5-5-15.5-11 4-10.5 14-5 15.5 0 0-2.5 1.5-2.5 4 0 0-.5.5 0 2z"/><path d="M25 8a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0z"/></g><path d="M17.5 26h10M15 30h15m-7.5-14.5v5M20 18h5" stroke-linejoin="miter"/></g></svg>`,
+                n: `<svg viewBox="0 0 45 45" class="piece-svg"><g fill="none" fill-rule="evenodd" stroke="#000" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"><path d="M22 10c10.5 1 16.5 8 16 29H15c0-9 10-6.5 8-21" fill="#fff"/><path d="M24 18c.38 2.43-4.7 1.85-5 0-.61-3.74 5.5-4.11 5-10-3.5 1.5-5.5 4-7 8.5-1.46 4.41-3.9 15.35-3.9 15.35s2.5 1.63 7.5 1.63c3.5 0 6.5-1.63 6.5-1.63l1.5-13.5c.5-5.5-5.5-9.5-5.5-9.5" fill="#fff"/><path d="M9.5 25.5A.5.5 0 1 1 9 25a.5.5 0 0 1 .5.5z" fill="#000"/><path d="M15 15.5a2 2 0 1 1-4 0 2 2 0 0 1 4 0z" fill="#000"/></g></svg>`,
+                p: `<svg viewBox="0 0 45 45" class="piece-svg"><g fill="#fff" fill-rule="evenodd" stroke="#000" stroke-linecap="round" stroke-width="1.5"><path d="M22.5 9a5 5 0 1 1-10 0 5 5 0 0 1 10 0zM12.5 18l1 15h18l1-15H12.5zM12 33h21v3H12v-3zM11 36h23l1 4H10l1-4z"/><path d="M12.5 18c4.5-2 15.5-2 20 0m-20 4.5c4.5-2 15.5-2 20 0m-20 4.5c4.5-2 15.5-2 20 0" fill="none" stroke-linejoin="round"/></g></svg>`
+            },
+            b: {
+                k: `<svg viewBox="0 0 45 45" class="piece-svg"><g fill="none" fill-rule="evenodd" stroke="#000" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"><path d="M22.5 11.63V6M20 8h5" stroke="#fff" stroke-linejoin="miter"/><path d="M22.5 25s4.5-7.5 4.5-11.06c0-2.27-2.02-4.44-4.5-4.44s-4.5 2.17-4.5 4.44c0 3.56 4.5 11.06 4.5 11.06z" fill="#000" stroke="#fff"/><path d="M11.5 37c5.5 3.5 15.5 3.5 21 0v-7s9-4.5 6-10.5c-4-1-1-4-1-4h-30s3 3-1 4c-3 6 6 10.5 6 10.5v7z" fill="#000" stroke="#fff"/><path d="M11.5 30c5.5-3 15.5-3 21 0m-21 3.5c5.5-3 15.5-3 21 0m-21 3.5c5.5-3 15.5-3 21 0" stroke="#fff" stroke-linejoin="miter"/></g></svg>`,
+                q: `<svg viewBox="0 0 45 45" class="piece-svg"><g fill="#000" fill-rule="evenodd" stroke="#000" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"><path d="M8 12a2 2 0 1 1-4 0 2 2 0 0 1 4 0zm14.5 0a2 2 0 1 1-4 0 2 2 0 0 1 4 0zm14.5 0a2 2 0 1 1-4 0 2 2 0 0 1 4 0zM9 26c8.5-1.5 21-1.5 27 0l2-12-7 11V11l-5.5 13.5-5.5-13.5V25L13 14l2 12z" stroke="#fff"/><path d="M9 26c0 2 1.5 2 2.5 4 2.5 5 18 5 21 0 1-2 2.5-2 2.5-4-8.5-1.5-18.5-1.5-26 0z" stroke="#fff"/><path d="M11 38.5c7 2.5 16 2.5 23 0v-5c-7 2.5-16 2.5-23 0v5z" stroke="#fff" stroke-linejoin="miter"/><path d="M11 31c7 2.5 16 2.5 23 0m-23 3.5c7 2.5 16 2.5 23 0" stroke="#fff" stroke-linejoin="miter"/></g></svg>`,
+                r: `<svg viewBox="0 0 45 45" class="piece-svg"><g fill="#000" fill-rule="evenodd" stroke="#000" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"><path d="M9 39h27v-3H9v3zM12 36l1.5-21h18l1.5 21H12zM11 14V9h4v2h5V9h5v2h5V9h4v5" stroke="#fff" stroke-linejoin="miter"/><path d="M34 14l-3 3H14l-3-3"/><path d="M31 17v12.5H14V17" stroke="#fff" stroke-linejoin="miter"/><path d="M31 29.5l1.5 2.5h-20l1.5-2.5" stroke="#fff"/><path d="M11 14h23" fill="none" stroke="#fff" stroke-linejoin="miter"/></g></svg>`,
+                b: `<svg viewBox="0 0 45 45" class="piece-svg"><g fill="none" fill-rule="evenodd" stroke="#000" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"><g fill="#000" stroke="#fff" stroke-linecap="butt"><path d="M9 36c3.39-.97 10.11.43 13.5-2 3.39 2.43 10.11 1.03 13.5 2 0 0 1 1 1 3H8c0-2 1-3 1-3z"/><path d="M15 32c2.5 2.5 12.5 2.5 15 0 .5-1.5 0-2 0-2 0-2.5-2.5-4-2.5-4 5.5-1.5 6-11.5-5-15.5-11 4-10.5 14-5 15.5 0 0-2.5 1.5-2.5 4 0 0-.5.5 0 2z"/><path d="M25 8a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0z"/></g><path d="M17.5 26h10M15 30h15m-7.5-14.5v5M20 18h5" stroke="#fff" stroke-linejoin="miter"/></g></svg>`,
+                n: `<svg viewBox="0 0 45 45" class="piece-svg"><g fill="none" fill-rule="evenodd" stroke="#000" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"><path d="M22 10c10.5 1 16.5 8 16 29H15c0-9 10-6.5 8-21" fill="#000" stroke="#fff"/><path d="M24 18c.38 2.43-4.7 1.85-5 0-.61-3.74 5.5-4.11 5-10-3.5 1.5-5.5 4-7 8.5-1.46 4.41-3.9 15.35-3.9 15.35s2.5 1.63 7.5 1.63c3.5 0 6.5-1.63 6.5-1.63l1.5-13.5c.5-5.5-5.5-9.5-5.5-9.5" fill="#000" stroke="#fff"/><path d="M9.5 25.5A.5.5 0 1 1 9 25a.5.5 0 0 1 .5.5z" fill="#fff"/><path d="M15 15.5a2 2 0 1 1-4 0 2 2 0 0 1 4 0z" fill="#fff"/></g></svg>`,
+                p: `<svg viewBox="0 0 45 45" class="piece-svg"><g fill="#000" fill-rule="evenodd" stroke="#000" stroke-linecap="round" stroke-width="1.5"><path d="M22.5 9a5 5 0 1 1-10 0 5 5 0 0 1 10 0zM12.5 18l1 15h18l1-15H12.5zM12 33h21v3H12v-3zM11 36h23l1 4H10l1-4z" stroke="#fff"/><path d="M12.5 18c4.5-2 15.5-2 20 0m-20 4.5c4.5-2 15.5-2 20 0m-20 4.5c4.5-2 15.5-2 20 0" fill="none" stroke="#fff" stroke-linejoin="round"/></g></svg>`
+            }
+        };
+
+        let board = [];
+        let turn = 'w';
+        let selectedSq = null;
+        let validMoves = [];
+        let lastMove = null;
+        let capturedPieces = { w: [], b: [] };
+        let moveHistory = [];
+        let castling = { w: { k: true, q: true }, b: { k: true, q: true } };
+        let enPassant = null;
+        let isBotEnabled = false;
+        let isThinking = false;
+
+        const boardEl = document.getElementById('board');
+        const turnText = document.getElementById('turn-text');
+        const alertEl = document.getElementById('game-alert');
+
+        function initGame() {
+            board = Array(8).fill(null).map(() => Array(8).fill(null));
+            const layout = ['r', 'n', 'b', 'q', 'k', 'b', 'n', 'r'];
+            for (let i = 0; i < 8; i++) {
+                board[0][i] = { type: layout[i], color: 'b' };
+                board[1][i] = { type: 'p', color: 'b' };
+                board[6][i] = { type: 'p', color: 'w' };
+                board[7][i] = { type: layout[i], color: 'w' };
+            }
+            turn = 'w';
+            selectedSq = null;
+            validMoves = [];
+            lastMove = null;
+            capturedPieces = { w: [], b: [] };
+            moveHistory = [];
+            castling = { w: { k: true, q: true }, b: { k: true, q: true } };
+            enPassant = null;
+            isThinking = false;
+            render();
+            updateUI();
+        }
+
+        function handleSquareClick(r, c) {
+            if (isThinking) return;
+            const move = validMoves.find(m => m.r === r && m.c === c);
+            if (move) {
+                executeMove(selectedSq.r, selectedSq.c, r, c);
+                return;
+            }
+            const piece = board[r][c];
+            if (piece && piece.color === turn) {
+                selectedSq = { r, c };
+                validMoves = getLegalMoves(r, c, board);
+            } else {
+                selectedSq = null;
+                validMoves = [];
+            }
+            render();
+        }
+
+        function getRawMoves(r, c, currentBoard) {
+            const piece = currentBoard[r][c];
+            if (!piece) return [];
+            const moves = [];
+            const dir = piece.color === 'w' ? -1 : 1;
+
+            if (piece.type === 'p') {
+                if (isValid(r + dir, c) && !currentBoard[r + dir][c]) {
+                    moves.push({ r: r + dir, c });
+                    if (r === (piece.color === 'w' ? 6 : 1) && !currentBoard[r + 2 * dir][c]) moves.push({ r: r + 2 * dir, c });
+                }
+                [[-1, -1], [-1, 1]].forEach(offset => {
+                    const nr = r + dir, nc = c + offset[1];
+                    if (isValid(nr, nc)) {
+                        const target = currentBoard[nr][nc];
+                        if (target && target.color !== piece.color) moves.push({ r: nr, c: nc });
+                        if (enPassant && nr === enPassant.r && nc === enPassant.c) moves.push({ r: nr, c: nc, special: 'ep' });
+                    }
+                });
+            } else if (piece.type === 'n') {
+                [[-2, -1], [-2, 1], [-1, -2], [-1, 2], [1, -2], [1, 2], [2, -1], [2, 1]].forEach(([dr, dc]) => {
+                    const nr = r + dr, nc = c + dc;
+                    if (isValid(nr, nc) && (!currentBoard[nr][nc] || currentBoard[nr][nc].color !== piece.color)) moves.push({ r: nr, c: nc });
+                });
+            } else {
+                const patterns = {
+                    r: [[0, 1], [0, -1], [1, 0], [-1, 0]],
+                    b: [[1, 1], [1, -1], [-1, 1], [-1, -1]],
+                    q: [[0, 1], [0, -1], [1, 0], [-1, 0], [1, 1], [1, -1], [-1, 1], [-1, -1]],
+                    k: [[0, 1], [0, -1], [1, 0], [-1, 0], [1, 1], [1, -1], [-1, 1], [-1, -1]]
+                }[piece.type];
+                patterns.forEach(([dr, dc]) => {
+                    let nr = r + dr, nc = c + dc;
+                    while (isValid(nr, nc)) {
+                        const target = currentBoard[nr][nc];
+                        if (!target) { moves.push({ r: nr, c: nc }); if (piece.type === 'k') break; }
+                        else { if (target.color !== piece.color) moves.push({ r: nr, c: nc }); break; }
+                        nr += dr; nc += dc;
+                    }
+                });
+            }
+            return moves;
+        }
+
+        function getLegalMoves(r, c, currentBoard) {
+            let moves = getRawMoves(r, c, currentBoard);
+            moves = moves.filter(m => {
+                const bCopy = boardCopy(currentBoard);
+                if (m.special === 'ep') bCopy[r][m.c] = null;
+                bCopy[m.r][m.c] = bCopy[r][c];
+                bCopy[r][c] = null;
+                return !isCheck(currentBoard[r][c].color, bCopy);
+            });
+            const piece = currentBoard[r][c];
+            if (piece.type === 'k' && !isCheck(piece.color, currentBoard)) {
+                const side = piece.color;
+                const row = side === 'w' ? 7 : 0;
+                if (castling[side].k && !currentBoard[row][5] && !currentBoard[row][6] && isSafe(row, 5, side, currentBoard) && isSafe(row, 6, side, currentBoard)) moves.push({ r: row, c: 6, special: 'castle_k' });
+                if (castling[side].q && !currentBoard[row][1] && !currentBoard[row][2] && !currentBoard[row][3] && isSafe(row, 2, side, currentBoard) && isSafe(row, 3, side, currentBoard)) moves.push({ r: row, c: 2, special: 'castle_q' });
+            }
+            return moves;
+        }
+
+        async function executeMove(fr, fc, tr, tc) {
+            const piece = board[fr][fc];
+            const move = getLegalMoves(fr, fc, board).find(m => m.r === tr && m.c === tc);
+            if (!move) return;
+            const captured = board[tr][tc];
+            selectedSq = null; validMoves = [];
+
+            if (move.special === 'ep') { capturedPieces[turn === 'w' ? 'b' : 'w'].push(board[fr][tc]); board[fr][tc] = null; }
+            else if (move.special?.startsWith('castle')) {
+                const rookC = move.special === 'castle_k' ? 7 : 0, rDestC = move.special === 'castle_k' ? 5 : 3;
+                board[fr][rDestC] = board[fr][rookC]; board[fr][rookC] = null;
+            }
+            if (captured) capturedPieces[turn === 'w' ? 'b' : 'w'].push(captured);
+            if (piece.type === 'p' && (tr === 0 || tr === 7)) piece.type = await promptPromotion(piece.color);
+            
+            board[tr][tc] = piece; board[fr][fc] = null;
+            if (piece.type === 'k') castling[turn] = { k: false, q: false };
+            if (piece.type === 'r') { if (fc === 0) castling[turn].q = false; if (fc === 7) castling[turn].k = false; }
+            enPassant = (piece.type === 'p' && Math.abs(tr - fr) === 2) ? { r: (fr + tr) / 2, c: fc } : null;
+            lastMove = { fr, fc, tr, tc };
+            logMove(piece, fr, fc, tr, tc, captured);
+            turn = turn === 'w' ? 'b' : 'w';
+            render(); updateUI();
+            if (!checkGameOver() && isBotEnabled && turn === 'b') makeBotMove();
+        }
+
+        function evaluateBoard(curr) {
+            const vals = { p: 10, n: 30, b: 30, r: 50, q: 90, k: 900 };
+            let s = 0;
+            for (let r = 0; r < 8; r++) for (let c = 0; c < 8; c++) if (curr[r][c]) s += (curr[r][c].color === 'w' ? -vals[curr[r][c].type] : vals[curr[r][c].type]);
+            return s;
+        }
+
+        function minimax(curr, depth, alpha, beta, isMax) {
+            if (depth === 0) return evaluateBoard(curr);
+            const moves = [];
+            for (let r = 0; r < 8; r++) for (let c = 0; c < 8; c++) if (curr[r][c] && curr[r][c].color === (isMax ? 'b' : 'w')) {
+                getLegalMoves(r, c, curr).forEach(m => moves.push({ fr: r, fc: c, tr: m.r, tc: m.c, special: m.special }));
+            }
+            if (moves.length === 0) return isMax ? -9999 : 9999;
+            if (isMax) {
+                let max = -Infinity;
+                for (const m of moves) {
+                    const bc = simulate(curr, m);
+                    const ev = minimax(bc, depth - 1, alpha, beta, false);
+                    max = Math.max(max, ev); alpha = Math.max(alpha, ev); if (beta <= alpha) break;
+                }
+                return max;
+            } else {
+                let min = Infinity;
+                for (const m of moves) {
+                    const bc = simulate(curr, m);
+                    const ev = minimax(bc, depth - 1, alpha, beta, true);
+                    min = Math.min(min, ev); beta = Math.min(beta, ev); if (beta <= alpha) break;
+                }
+                return min;
+            }
+        }
+
+        function simulate(src, m) {
+            const b = boardCopy(src); const p = b[m.fr][m.fc];
+            if (m.special === 'ep') b[m.fr][m.tc] = null;
+            b[m.tr][m.tc] = p; b[m.fr][m.fc] = null; return b;
+        }
+
+        async function makeBotMove() {
+            isThinking = true; updateUI();
+            await new Promise(r => setTimeout(r, 600));
+            const diff = parseInt(document.getElementById('bot-difficulty').value);
+            let best = null, bestVal = -Infinity;
+            const moves = [];
+            for (let r = 0; r < 8; r++) for (let c = 0; c < 8; c++) if (board[r][c] && board[r][c].color === 'b') {
+                getLegalMoves(r, c, board).forEach(m => moves.push({ fr: r, fc: c, tr: m.r, tc: m.c, special: m.special }));
+            }
+            if (moves.length > 0) {
+                moves.sort(() => Math.random() - 0.5);
+                for (const m of moves) {
+                    const val = minimax(simulate(board, m), diff - 1, -Infinity, Infinity, false);
+                    if (val > bestVal) { bestVal = val; best = m; }
+                }
+                if (best) executeMove(best.fr, best.fc, best.tr, best.tc);
+            }
+            isThinking = false;
+        }
+
+        function isCheck(color, b) {
+            let k = null; for (let r = 0; r < 8; r++) for (let c = 0; c < 8; c++) if (b[r][c]?.type === 'k' && b[r][c]?.color === color) k = { r, c };
+            return k ? !isSafe(k.r, k.c, color, b) : false;
+        }
+        function isSafe(r, c, color, b) {
+            const enemy = color === 'w' ? 'b' : 'w';
+            for (let tr = 0; tr < 8; tr++) for (let tc = 0; tc < 8; tc++) if (b[tr][tc]?.color === enemy) if (getRawMoves(tr, tc, b).some(m => m.r === r && m.c === c)) return false;
+            return true;
+        }
+        function render() {
+            boardEl.innerHTML = '';
+            for (let r = 0; r < 8; r++) for (let c = 0; c < 8; c++) {
+                const sq = document.createElement('div');
+                sq.className = `square ${(r + c) % 2 === 0 ? 'light' : 'dark'}`;
+                if (selectedSq?.r === r && selectedSq?.c === c) sq.classList.add('selected');
+                if (lastMove && ((lastMove.fr === r && lastMove.fc === c) || (lastMove.tr === r && lastMove.tc === c))) sq.classList.add('last-move');
+                if (board[r][c]) sq.innerHTML = SVG_PIECES[board[r][c].color][board[r][c].type];
+                if (validMoves.find(m => m.r === r && m.c === c)) {
+                    const ind = document.createElement('div'); ind.className = board[r][c] ? 'capture-ring' : 'move-dot'; sq.appendChild(ind);
+                }
+                sq.onclick = () => handleSquareClick(r, c); boardEl.appendChild(sq);
+            }
+            const wEl = document.getElementById('captured-white'), bEl = document.getElementById('captured-black');
+            wEl.innerHTML = capturedPieces.w.map(p => `<div class="w-5 h-5 drop-shadow-sm">${SVG_PIECES.w[p.type]}</div>`).join('');
+            bEl.innerHTML = capturedPieces.b.map(p => `<div class="w-5 h-5 drop-shadow-sm">${SVG_PIECES.b[p.type]}</div>`).join('');
+        }
+        function updateUI() {
+            const isWhite = turn === 'w'; turnText.textContent = isThinking ? "Thinking..." : (isWhite ? "White's turn" : "Black's turn");
+            const card = document.getElementById('turn-card');
+            if (isWhite) { card.className = "mb-6 p-4 rounded-md transition-all border-l-4 border-white bg-[#262421]"; }
+            else { card.className = "mb-6 p-4 rounded-md transition-all border-l-4 border-gray-600 bg-[#262421]"; }
+        }
+        function boardCopy(src) { return src.map(row => row.map(p => p ? { ...p } : null)); }
+        function isValid(r, c) { return r >= 0 && r < 8 && c >= 0 && c < 8; }
+        function logMove(p, fr, fc, tr, tc, cap) {
+            const f = 'abcdefgh', r = '87654321', move = `${p.type.toUpperCase()}${f[fc]}${r[fr]}${cap ? 'x' : '-'}${f[tc]}${r[tr]}`;
+            moveHistory.push(move); const h = document.getElementById('move-history'), e = document.createElement('div');
+            e.className = "flex justify-between p-2 border-b border-white/5 hover:bg-white/5"; e.innerHTML = `<span>${moveHistory.length}. <b>${move}</b></span><span class="opacity-50">${p.color === 'w' ? 'W' : 'B'}</span>`;
+            h.prepend(e);
+        }
+        async function promptPromotion(color) {
+            const modal = document.getElementById('promotion-modal'), options = document.getElementById('promotion-options');
+            modal.classList.remove('hidden'); options.innerHTML = '';
+            return new Promise(res => {
+                ['q', 'r', 'b', 'n'].forEach(t => {
+                    const btn = document.createElement('button'); btn.className = "p-2 bg-[#262421] hover:bg-white/10 rounded border border-white/5 w-16 h-16"; btn.innerHTML = SVG_PIECES[color][t];
+                    btn.onclick = () => { modal.classList.add('hidden'); res(t); }; options.appendChild(btn);
+                });
+            });
+        }
+        function checkGameOver() {
+            let hasMoves = false; for (let r = 0; r < 8; r++) for (let c = 0; c < 8; c++) if (board[r][c]?.color === turn) if (getLegalMoves(r, c, board).length > 0) hasMoves = true;
+            if (!hasMoves) { alertEl.classList.remove('hidden'); alertEl.textContent = isCheck(turn, board) ? `CHECKMATE! ${turn === 'w' ? 'Black' : 'White'} Wins!` : "STALEMATE!"; return true; }
+            return false;
+        }
+        document.getElementById('bot-toggle').onchange = (e) => { isBotEnabled = e.target.checked; document.getElementById('bot-settings').classList.toggle('hidden', !isBotEnabled); if (isBotEnabled && turn === 'b' && !isThinking) makeBotMove(); };
+        document.getElementById('reset-btn').onclick = () => { alertEl.classList.add('hidden'); document.getElementById('move-history').innerHTML = ''; initGame(); };
+        window.onload = initGame;
+    </script>
+</body>
+</html>
